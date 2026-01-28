@@ -123,55 +123,46 @@ add_action( 'rest_api_init', function() use ($time_interval_fieldname, $default_
 });
 
 /**
- * 5. STORE API: Expose fields to WC Store API (Strict Schema Way)
+ * 5. STORE API: Expose fields via woocommerce_blocks_loaded (The Correct Timing)
  */
-add_action( 'woocommerce_store_api_register_endpoint_data', function() use ($time_interval_fieldname, $default_stock_fieldname) {
-    
-    if ( ! class_exists( 'Automattic\WooCommerce\StoreApi\Schemas\V1\ProductSchema' ) ) {
-        return;
-    }
+add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldname, $default_stock_fieldname) {
 
-    woocommerce_store_api_register_endpoint_data(
-        array(
-            'endpoint'        => ProductSchema::IDENTIFIER, // 'product'
-            'namespace'       => 'konfusius_extender',
-            'data_callback'   => function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
-                $id = $product->get_id();
-                
-                // Get time_interval
-                $time_val = get_post_meta( $id, $time_interval_fieldname, true );
+	// 1. Ensure the helper function exists
+	if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
+		return;
+	}
 
-                // Get info_number with parent inheritance
-                $stock_val = get_post_meta( $id, $default_stock_fieldname, true );
-                $parent_id = $product->get_parent_id();
-                if ( empty($stock_val) && $parent_id ) {
-                    $stock_val = get_post_meta( $parent_id, $default_stock_fieldname, true );
-                }
+	// 2. Register the data
+	woocommerce_store_api_register_endpoint_data(
+		array(
+			'endpoint'        => 'product', // Using string 'product' is safer than the class constant sometimes
+			'namespace'       => 'konfusius_extender',
+			'data_callback'   => function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
+				$id = $product->get_id();
+				
+				$time_val = get_post_meta( $id, $time_interval_fieldname, true );
+				$stock_val = get_post_meta( $id, $default_stock_fieldname, true );
 
-                return array(
-                    'time_interval'       => (string) $time_val,
-                    'default_stock_count' => (int) absint( $stock_val ),
-                );
-            },
-            'schema_callback' => function() {
-                return array(
-                    'properties' => array(
-                        'time_interval' => array(
-                            'description' => __( 'Interval string for shifts.', 'woocommerce' ),
-                            'type'        => 'string',
-                            'context'     => array( 'view', 'edit' ),
-                            'readonly'    => true,
-                        ),
-                        'default_stock_count' => array(
-                            'description' => __( 'Informative stock planning count.', 'woocommerce' ),
-                            'type'        => 'integer', // Store API prefers strings or integers
-                            'context'     => array( 'view', 'edit' ),
-                            'readonly'    => true,
-                        ),
-                    ),
-                );
-            },
-            'schema_type'     => ARRAY_A,
-        )
-    );
+				// Inheritance for variations
+				$parent_id = $product->get_parent_id();
+				if ( empty( $stock_val ) && $parent_id ) {
+					$stock_val = get_post_meta( $parent_id, $default_stock_fieldname, true );
+				}
+
+				return array(
+					'time_interval'       => (string) $time_val,
+					'default_stock_count' => (int) absint( $stock_val ),
+				);
+			},
+			'schema_callback' => function() {
+				return array(
+					'properties' => array(
+						'time_interval'       => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
+						'default_stock_count' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
+					),
+				);
+			},
+			'schema_type'     => ARRAY_A,
+		)
+	);
 });
