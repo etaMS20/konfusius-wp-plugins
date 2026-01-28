@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Plugin Name: Custom WooCommerce Checkout Meta
+ * Plugin Name: Konfusius Invite Field Checkout Meta
  * Description: Intercepts cart API checkout POST requests and looks for `invited_by` attribute within the payload. Its value is validated against a set of allowed values, if invalid the checkout is cancelled. If valid, sets the "billing_invite" field of the orders billing object.
  * Author: M. Schädle
  * Version: 1.0.1
