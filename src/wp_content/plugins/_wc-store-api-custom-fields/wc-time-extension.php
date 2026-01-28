@@ -9,7 +9,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 $time_interval_fieldname = 'time_interval';
-$default_stock_fieldname = 'default_instock_count';
+$default_stock_fieldname = 'default_stock';
 
 /**
  * 1. UI: Add the input fields to Admin
@@ -88,31 +88,28 @@ add_action( 'rest_api_init', function() use ($time_interval_fieldname, $default_
         'get_callback' => function( $object ) use ($time_interval_fieldname, $default_stock_fieldname) {
             $id = isset( $object['id'] ) ? $object['id'] : $object['ID'];
             
-            // Get time_interval from the specific item (product or variation)
             $time_val = get_post_meta( $id, $time_interval_fieldname, true );
 
-            // Get the info_number. If it's a variation, look at the parent.
             $stock_val = get_post_meta( $id, $default_stock_fieldname, true );
             
-            // IF current ID is a variation and info_val is empty, get parent info
             $parent_id = wp_get_post_parent_id($id);
             if ( empty($stock_val) && $parent_id ) {
                 $stock_val = get_post_meta( $parent_id, $default_stock_fieldname, true );
             }
 
             return array(
-                'time_interval' => (string) $time_val,
-                'default_stock_count' => (int) absint( $stock_val )
+                $time_interval_fieldname => (string) $time_val,
+                $default_stock_fieldname => (int) absint( $stock_val )
             );
         },
         'schema' => array(
             'type'       => 'object',
             'context'    => array( 'view', 'edit' ),
             'properties' => array(
-                'time_interval' => array(
+                $time_interval_fieldname => array(
                     'type' => 'string',
                 ),
-                'default_stock_count' => array(
+                $default_stock_fieldname => array(
                     'type' => 'integer',
                 ),
             ),
@@ -121,46 +118,75 @@ add_action( 'rest_api_init', function() use ($time_interval_fieldname, $default_
 });
 
 /**
- * 5. STORE API: Expose fields via woocommerce_blocks_loaded (The Correct Timing)
+ * 5. API: Expose to WooCommerce Store API
  */
 add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldname, $default_stock_fieldname) {
 
-	// 1. Ensure the helper function exists
 	if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
 		return;
 	}
 
-	// 2. Register the data
-	woocommerce_store_api_register_endpoint_data(
-		array(
-			'endpoint'        => 'product',
-			'namespace'       => 'konfusius_shift',
-			'data_callback'   => function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
-				$id = $product->get_id();
-				
-				$time_val = get_post_meta( $id, $time_interval_fieldname, true );
-				$stock_val = get_post_meta( $id, $default_stock_fieldname, true );
+    $data_callback = function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
+        $id = $product->get_id();
 
-				// Inheritance for variations
-				$parent_id = $product->get_parent_id();
-				if ( empty( $stock_val ) && $parent_id ) {
-					$stock_val = get_post_meta( $parent_id, $default_stock_fieldname, true );
-				}
+        $data = array(
+            $time_interval_fieldname    => (string) get_post_meta( $id, $time_interval_fieldname, true ),
+            $default_stock_fieldname    => (int) absint( get_post_meta( $id, $default_stock_fieldname, true ) ),
+            'variation_data'            => array()
+        );
 
-				return array(
-					'time_interval'       => (string) $time_val,
-					'default_stock_count' => (int) absint( $stock_val ),
-				);
-			},
-			'schema_callback' => function() {
-				return array(
-					'properties' => array(
-						'time_interval'       => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
-						'default_stock_count' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
-					),
-				);
-			},
-			'schema_type'     => ARRAY_A,
-		)
-	);
+    if ( $product->is_type( 'variable' ) ) {
+        $variations = $product->get_available_variations('objects');
+            
+        foreach ( $variations as $variation ) {
+            $v_id = $variation->get_id();
+                
+            $v_stock = get_post_meta( $v_id, $default_stock_fieldname, true );
+            $final_stock = ( $v_stock !== '' ) ? absint($v_stock) : $data[$default_stock_fieldname];
+
+            $data['variation_data'][] = array(
+                'id'                     => (int) $v_id,
+                'name'                   => (string) $variation->get_name(),
+                $time_interval_fieldname => (string) get_post_meta( $v_id, $time_interval_fieldname, true ),
+                $default_stock_fieldname => (int) $final_stock
+            );
+        }
+    }
+        
+    return $data;
+    };
+
+    $schema_callback = function() use ($time_interval_fieldname, $default_stock_fieldname) {
+        return array(
+            'properties' => array(
+                $time_interval_fieldname => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
+                $default_stock_fieldname => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
+                'variation_data' => array(
+                    'type'     => 'array',
+                    'context'  => array( 'view', 'edit' ),
+                    'readonly' => true,
+                    'items'    => array(
+                        'type'       => 'object',
+                        'properties' => array(
+                            'id'                    => array( 'type' => 'integer' ),
+                            'name'                  => array( 'type'=> 'string' ),
+                            $time_interval_fieldname => array( 'type' => 'string' ),
+                            $default_stock_fieldname => array( 'type' => 'integer' ),
+                        ),
+                    ),
+                ),
+            ),
+        );
+    };
+
+    // register the endpoint data
+    woocommerce_store_api_register_endpoint_data(
+        array(
+            'endpoint'        => 'product',
+            'namespace'       => 'konfusius_shift',
+            'data_callback'   => $data_callback,
+            'schema_callback' => $schema_callback,
+            'schema_type'     => ARRAY_A,
+        )
+    );
 });
