@@ -8,8 +8,6 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-use Automattic\WooCommerce\StoreApi\Schemas\V1\ProductSchema;
-
 $time_interval_fieldname = 'time_interval';
 $default_stock_fieldname = 'default_instock_count';
 
@@ -86,7 +84,7 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
  * 4. API: Expose to REST API
  */
 add_action( 'rest_api_init', function() use ($time_interval_fieldname, $default_stock_fieldname) {
-    register_rest_field( array( 'product', 'product_variation' ), 'app_custom_val', array(
+    register_rest_field( array( 'product', 'product_variation' ), 'konfusius_shift', array(
         'get_callback' => function( $object ) use ($time_interval_fieldname, $default_stock_fieldname) {
             $id = isset( $object['id'] ) ? $object['id'] : $object['ID'];
             
@@ -135,8 +133,8 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
 	// 2. Register the data
 	woocommerce_store_api_register_endpoint_data(
 		array(
-			'endpoint'        => 'product', // Using string 'product' is safer than the class constant sometimes
-			'namespace'       => 'konfusius_extender',
+			'endpoint'        => 'product',
+			'namespace'       => 'konfusius_shift',
 			'data_callback'   => function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
 				$id = $product->get_id();
 				
