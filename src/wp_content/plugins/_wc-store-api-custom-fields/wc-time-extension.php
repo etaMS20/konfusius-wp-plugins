@@ -9,31 +9,63 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 $time_interval_fieldname = 'time_interval';
-$default_stock_fieldname = 'default_stock';
+$default_stock_fieldname = 'planned_stock';
 
 /**
  * 1. UI: Add the input fields to Admin
  */
 // Simple Products
 add_action( 'woocommerce_product_options_general_product_data', function() use ($time_interval_fieldname, $default_stock_fieldname ) {
+    global $post;
+    $product = wc_get_product( $post->ID );
     echo '<div class="options_group">';
-    woocommerce_wp_text_input( array(
-        'id'          => $time_interval_fieldname,
-        'label'       => __( 'Zeit Intervall für die Schicht', 'woocommerce' ),
-        'description' => __( 'Zeitintervall für diese Schicht. Wird auch in Orders angezeigt.', 'woocommerce' ),
-        'desc_tip'    => true
-    ) );
-    woocommerce_wp_text_input( array(
-        'id'                => $default_stock_fieldname,
-        'label'             => __( 'Standard Anzahl an Schichten', 'woocommerce' ),
-        'type'              => 'number',
-        'custom_attributes' => array(
-            'step' => '1',
-            'min'  => '0'
-        ),
-        'desc_tip'    => true,
-        'description' => __( 'Standard Anzahl an Schichten. (nur informativ)', 'woocommerce' )
-    ) );
+    if ( $product && $product->is_type( 'variable' ) ) {
+        // Editable default stock for all variations
+        woocommerce_wp_text_input( array(
+            'id'          => $default_stock_fieldname,
+            'label'       => __( 'Geplante Anzahl an Schichten für Varianten', 'woocommerce' ),
+            'type'        => 'number',
+            'custom_attributes' => array(
+                'step' => '1',
+                'min'  => '0'
+            ),
+            'desc_tip'    => true,
+            'description' => __( 'Wird beim Speichern auf alle Varianten angewendet.', 'woocommerce' )
+        ) );
+        // Readonly sum of all variation stocks
+        $sum = 0;
+        $children = $product->get_children();
+        foreach ( $children as $child_id ) {
+            $sum += (int) get_post_meta( $child_id, $default_stock_fieldname, true );
+        }
+        woocommerce_wp_text_input( array(
+            'id'                => $default_stock_fieldname . '_sum',
+            'label'             => __( 'Summe aller geplanten Schichten', 'woocommerce' ),
+            'type'              => 'number',
+            'custom_attributes' => array( 'readonly' => 'readonly' ),
+            'value'             => $sum,
+            'desc_tip'          => true,
+            'description'       => __( 'Summe der geplanten Anzahl an Schichten aller Varianten (informativ).', 'woocommerce' )
+        ) );
+    } else {
+        woocommerce_wp_text_input( array(
+            'id'          => $time_interval_fieldname,
+            'label'       => __( 'Zeit Intervall für die Schicht', 'woocommerce' ),
+            'description' => __( 'Zeitintervall für diese Schicht. Wird auch in Orders angezeigt.', 'woocommerce' ),
+            'desc_tip'    => true
+        ) );
+        woocommerce_wp_text_input( array(
+            'id'                => $default_stock_fieldname,
+            'label'             => __( 'Geplante Anzahl an Schichten', 'woocommerce' ),
+            'type'              => 'number',
+            'custom_attributes' => array(
+                'step' => '1',
+                'min'  => '0'
+            ),
+            'desc_tip'    => true,
+            'description' => __( 'Geplante Anzahl an Schichten. (informativ)', 'woocommerce' )
+        ) );
+    }
     echo '</div>';
 });
 
@@ -50,15 +82,25 @@ add_action( 'woocommerce_product_after_variable_attributes', function( $loop, $v
 /**
  * 2. SAVE: Store the data securely
  */
-add_action( 'woocommerce_process_product_meta', function( $post_id ) use ($time_interval_fieldname, $default_stock_fieldname) {
-    if ( isset( $_POST[$time_interval_fieldname] ) ) {
-        update_post_meta( $post_id, $time_interval_fieldname, sanitize_text_field( $_POST[$time_interval_fieldname] ) );
+add_action( 'woocommerce_process_product_meta', function( $post_id ) use ($default_stock_fieldname) {
+    $product = wc_get_product( $post_id );
+    if ( $product && $product->is_type( 'variable' ) ) {
+        if ( isset( $_POST[$default_stock_fieldname] ) ) {
+            $value = sanitize_text_field( $_POST[$default_stock_fieldname] );
+            update_post_meta( $post_id, $default_stock_fieldname, $value );
+            // Apply to all variations
+            $children = $product->get_children();
+            foreach ( $children as $child_id ) {
+                update_post_meta( $child_id, $default_stock_fieldname, $value );
+            }
+        }
+    } else {
+        // Simple product: save as usual
+        if ( isset( $_POST[$default_stock_fieldname] ) ) {
+            update_post_meta( $post_id, $default_stock_fieldname, sanitize_text_field( $_POST[$default_stock_fieldname] ) );
+        }
     }
-    if ( isset( $_POST[$default_stock_fieldname] ) ) {
-        // Use filter_var or floatval if you need decimals, or absint for whole numbers
-        update_post_meta( $post_id, $default_stock_fieldname, sanitize_text_field( $_POST[$default_stock_fieldname] ) );
-    }
-});
+}, 20 );
 
 add_action( 'woocommerce_save_product_variation', function( $variation_id, $i ) use ($time_interval_fieldname) {
     if ( isset( $_POST[$time_interval_fieldname][$i] ) ) {
@@ -129,29 +171,51 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
     $data_callback = function( $product ) use ($time_interval_fieldname, $default_stock_fieldname) {
         $id = $product->get_id();
 
+        $raw_stock = get_post_meta( $id, $default_stock_fieldname, true );
+        $raw_time = get_post_meta( $id, $time_interval_fieldname, true );
+        if ( ! empty( $raw_stock ) ) {
+            $raw_stock = absint( $raw_stock );
+        } else {
+            $raw_stock = null;
+        }
+
+        if ( empty( $raw_time ) ) {
+            $raw_time = null;
+        }
+
         $data = array(
-            $time_interval_fieldname    => (string) get_post_meta( $id, $time_interval_fieldname, true ),
-            $default_stock_fieldname    => (int) absint( get_post_meta( $id, $default_stock_fieldname, true ) ),
+            $time_interval_fieldname    => $raw_time,
+            $default_stock_fieldname    => $raw_stock,
             'variation_data'            => array()
         );
 
-    if ( $product->is_type( 'variable' ) ) {
-        $variations = $product->get_available_variations('objects');
-            
-        foreach ( $variations as $variation ) {
-            $v_id = $variation->get_id();
-                
-            $v_stock = get_post_meta( $v_id, $default_stock_fieldname, true );
-            $final_stock = ( $v_stock !== '' ) ? absint($v_stock) : $data[$default_stock_fieldname];
+        if ( $product->is_type( 'variable' ) ) {
+            $variations = $product->get_available_variations('objects');
+            foreach ( $variations as $variation ) {
+                $v_id = $variation->get_id();
+                $v_stock = get_post_meta( $v_id, $default_stock_fieldname, true );
+                $final_stock = ( $v_stock !== '' ) ? absint($v_stock) : $data[$default_stock_fieldname];
 
-            $data['variation_data'][] = array(
-                'id'                     => (int) $v_id,
-                'name'                   => (string) $variation->get_name(),
-                $time_interval_fieldname => (string) get_post_meta( $v_id, $time_interval_fieldname, true ),
-                $default_stock_fieldname => (int) $final_stock
-            );
+                $raw_v_time = get_post_meta( $v_id, $time_interval_fieldname, true );
+                if ( empty( $raw_v_time ) ) {
+                    $raw_v_time = $raw_time;
+                }
+
+                $data['variation_data'][] = array(
+                    'id'                     => (int) $v_id,
+                    'name'                   => (string) $variation->get_name(),
+                    $time_interval_fieldname => (string) $raw_v_time,
+                    $default_stock_fieldname => $final_stock
+                );
+            }
+            // Now sum the stocks
+            $sum = 0;
+            foreach ( $data['variation_data'] as $v ) {
+                $sum += isset($v[$default_stock_fieldname]) ? (int)$v[$default_stock_fieldname] : 0;
+            }
+            $data['sum_planned_variations'] = $sum;
         }
-    }
+
         
     return $data;
     };
@@ -159,8 +223,8 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
     $schema_callback = function() use ($time_interval_fieldname, $default_stock_fieldname) {
         return array(
             'properties' => array(
-                $time_interval_fieldname => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
-                $default_stock_fieldname => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true ),
+                $time_interval_fieldname => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
+                $default_stock_fieldname => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
                 'variation_data' => array(
                     'type'     => 'array',
                     'context'  => array( 'view', 'edit' ),
@@ -170,11 +234,12 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
                         'properties' => array(
                             'id'                    => array( 'type' => 'integer' ),
                             'name'                  => array( 'type'=> 'string' ),
-                            $time_interval_fieldname => array( 'type' => 'string' ),
-                            $default_stock_fieldname => array( 'type' => 'integer' ),
+                            $time_interval_fieldname => array( 'type' => 'string', 'nullable' => true ),
+                            $default_stock_fieldname => array( 'type' => 'integer', 'nullable' => true ),
                         ),
                     ),
                 ),
+                'sum_planned_variations' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
             ),
         );
     };
