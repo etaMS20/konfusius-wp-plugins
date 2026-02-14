@@ -186,11 +186,14 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
         $data = array(
             $time_interval_fieldname    => $raw_time,
             $default_stock_fieldname    => $raw_stock,
+            'stock_count'               => $product->get_stock_quantity(),
             'variation_data'            => array()
         );
 
         if ( $product->is_type( 'variable' ) ) {
             $variations = $product->get_available_variations('objects');
+            $sum_planned = 0;
+            $sum_actual = 0;
             foreach ( $variations as $variation ) {
                 $v_id = $variation->get_id();
                 $v_stock = get_post_meta( $v_id, $default_stock_fieldname, true );
@@ -201,19 +204,24 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
                     $raw_v_time = $raw_time;
                 }
 
+                $actual_stock = null;
+                if ( $variation->managing_stock() ) {
+                    $actual_stock = $variation->get_stock_quantity();
+                }
+
                 $data['variation_data'][] = array(
                     'id'                     => (int) $v_id,
                     'name'                   => (string) $variation->get_name(),
                     $time_interval_fieldname => (string) $raw_v_time,
-                    $default_stock_fieldname => $final_stock
+                    $default_stock_fieldname => $final_stock,
+                    'stock_count'           => $actual_stock
                 );
+
+                $sum_planned += $final_stock;
+                $sum_actual += max(0, (int)$actual_stock);
             }
-            // Now sum the stocks
-            $sum = 0;
-            foreach ( $data['variation_data'] as $v ) {
-                $sum += isset($v[$default_stock_fieldname]) ? (int)$v[$default_stock_fieldname] : 0;
-            }
-            $data['sum_planned_variations'] = $sum;
+            $data['sum_planned_variations'] = $sum_planned;
+            $data['sum_variations_stock_count'] = $sum_actual;
         }
 
         
@@ -225,6 +233,9 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
             'properties' => array(
                 $time_interval_fieldname => array( 'type' => 'string', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
                 $default_stock_fieldname => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
+                'stock_count' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
+                'sum_planned_variations' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
+                'sum_variations_stock_count' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
                 'variation_data' => array(
                     'type'     => 'array',
                     'context'  => array( 'view', 'edit' ),
@@ -236,10 +247,10 @@ add_action( 'woocommerce_blocks_loaded', function() use ($time_interval_fieldnam
                             'name'                  => array( 'type'=> 'string' ),
                             $time_interval_fieldname => array( 'type' => 'string', 'nullable' => true ),
                             $default_stock_fieldname => array( 'type' => 'integer', 'nullable' => true ),
+                            'stock_count'           => array( 'type' => 'integer', 'nullable' => true ),
                         ),
                     ),
                 ),
-                'sum_planned_variations' => array( 'type' => 'integer', 'context' => array( 'view', 'edit' ), 'readonly' => true, 'nullable' => true ),
             ),
         );
     };
