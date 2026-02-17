@@ -194,22 +194,23 @@ class KS_Shift_Plugin {
         $data = [
             'time_interval'  => $this->get_meta_string( $product->get_id(), self::META_TIME ),
             'planned_stock'  => null,
-            'stock_count'    => $product->managing_stock() ? $product->get_stock_quantity() : null,
+            'stock_count'    => null,
             'variation_data' => [],
         ];
 
-        // Einfaches Produkt: direkt zurückgeben
+        // Einfaches Produkt: direkt Werte zurückgeben
         if ( ! $product->is_type('variable') ) {
             $data['planned_stock'] = $this->get_meta_int( $product->get_id(), self::META_PLAN );
+            $data['stock_count']  = $product->managing_stock() ? $product->get_stock_quantity() : null;
             return $data;
         }
 
         $parent_manages = $product->managing_stock();
 
-        // Variables Produkt welches den Bestand auf Parent-Ebene verwaltet
+        // Variables Produkt, Parent-managed: Werte des Parents zurückgeben, Variationen auflisten (ohne eigene Bestandswerte, da diese vom Parent gesteuert werden)
         if ( $parent_manages ) {
-
             $data['planned_stock'] = $this->get_meta_int( $product->get_id(), self::META_PLAN );
+            $data['stock_count']   = $product->get_stock_quantity();
 
             foreach ( $product->get_children() as $variation_id ) {
                 $variation = wc_get_product( $variation_id );
@@ -220,31 +221,38 @@ class KS_Shift_Plugin {
                     'name'          => $variation->get_name(),
                     'time_interval' => $this->get_meta_string( $variation_id, self::META_TIME ),
                     'planned_stock' => null,
+                    'stock_count'   => null, // variations do not manage stock themselves
                 ];
             }
 
             return $data;
         }
 
-        // Variables Produkt welches den Bestand auf Variationsebene verwaltet: Alle geplanten Werte der Variationen aufsummieren und zurückgeben
-        $sum = 0;
+        // Variables Produkt, Variationen-managed: Werte der Variationen aggregieren
+        $sum_planned = 0;
+        $sum_stock   = 0;
 
         foreach ( $product->get_children() as $variation_id ) {
             $variation = wc_get_product( $variation_id );
             if ( ! $variation ) continue;
 
             $planned = $this->get_meta_int( $variation_id, self::META_PLAN );
-            $sum += (int) $planned;
+            $stock   = $variation->managing_stock() ? $variation->get_stock_quantity() : null;
+
+            $sum_planned += (int) $planned;
+            $sum_stock   += $stock ?? 0;
 
             $data['variation_data'][] = [
                 'id'            => $variation_id,
                 'name'          => $variation->get_name(),
                 'time_interval' => $this->get_meta_string( $variation_id, self::META_TIME ),
                 'planned_stock' => $planned,
+                'stock_count'   => $stock,
             ];
         }
 
-        $data['planned_stock'] = $sum;
+        $data['planned_stock'] = $sum_planned;
+        $data['stock_count']   = $sum_stock; // parent shows sum of variations stock_count
 
         return $data;
     }
@@ -255,6 +263,7 @@ class KS_Shift_Plugin {
             'properties' => [
                 'time_interval' => [ 'type' => 'string', 'nullable' => true, 'readonly' => true ],
                 'planned_stock' => [ 'type' => 'integer', 'nullable' => true, 'readonly' => true ],
+                'stock_count'   => [ 'type' => 'integer', 'nullable' => true, 'readonly' => true ],
                 'variation_data' => [
                     'type'  => 'array',
                     'items' => [
@@ -264,6 +273,7 @@ class KS_Shift_Plugin {
                             'name'          => [ 'type' => 'string' ],
                             'time_interval' => [ 'type' => 'string', 'nullable' => true ],
                             'planned_stock' => [ 'type' => 'integer', 'nullable' => true ],
+                            'stock_count'   => [ 'type' => 'integer', 'nullable' => true ],
                         ],
                     ],
                 ],
