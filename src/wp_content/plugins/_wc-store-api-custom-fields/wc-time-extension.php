@@ -206,7 +206,7 @@ class KS_Shift_Plugin {
 
         $parent_manages = $product->managing_stock();
 
-        // B) parent-managed stock
+        // Variables Produkt welches den Bestand auf Parent-Ebene verwaltet
         if ( $parent_manages ) {
 
             $data['planned_stock'] = $this->get_meta_int( $product->get_id(), self::META_PLAN );
@@ -226,7 +226,7 @@ class KS_Shift_Plugin {
             return $data;
         }
 
-        // A) variations manage stock
+        // Variables Produkt welches den Bestand auf Variationsebene verwaltet: Alle geplanten Werte der Variationen aufsummieren und zurückgeben
         $sum = 0;
 
         foreach ( $product->get_children() as $variation_id ) {
