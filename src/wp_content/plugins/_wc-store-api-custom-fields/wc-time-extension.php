@@ -105,6 +105,13 @@ class KS_Shift_Plugin {
             'value'         => get_post_meta( $variation->ID, self::META_TIME, true ),
             'wrapper_class' => 'form-row form-row-full',
         ]);
+
+        woocommerce_wp_text_input([
+            'id'            => self::META_PLAN . '[' . $loop . ']',
+            'label'         => __( 'Geplante Personen Anzahl', 'woocommerce' ),
+            'value'         => get_post_meta( $variation->ID, self::META_PLAN, true ),
+            'wrapper_class' => 'form-row form-row-full',
+        ]);
     }
 
     public function save_parent_fields( $post_id ) {
@@ -156,6 +163,14 @@ class KS_Shift_Plugin {
                 $variation_id,
                 self::META_TIME,
                 sanitize_text_field( $_POST[self::META_TIME][$i] )
+            );
+        }
+
+        if ( isset( $_POST[self::META_PLAN][$i] ) ) {
+            update_post_meta(
+                $variation_id,
+                self::META_PLAN,
+                absint( $_POST[self::META_PLAN][$i] )
             );
         }
     }
