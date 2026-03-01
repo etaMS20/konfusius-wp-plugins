@@ -43,7 +43,7 @@ class KS_Shift_Plugin {
         . __( 'Dient ausschließlich der Planung der Schichten. Die Bestände müssen separat verwaltet werden.', 'woocommerce' )
         . '</p>';
 
-        // Für einfache Produkte: Zeitintervall anzeigen
+        // Einfaches Produkt: Zeitintervall + geplante Anzahl anzeigen
         if ( ! $product->is_type( 'variable' ) ) {
             woocommerce_wp_text_input([
                 'id'          => self::META_TIME,
@@ -65,6 +65,7 @@ class KS_Shift_Plugin {
             ]);
         }
 
+        // Variables Produkt, Variationen verwalten ihren Bestand       
         if ( $product->is_type('variable') && ! $product->managing_stock() ) {
             $sum = 0;
             foreach ( $product->get_children() as $child_id ) {
@@ -80,8 +81,21 @@ class KS_Shift_Plugin {
                 'desc_tip'          => true,
                 'description'       => __( 'Summe der geplanten Anzahl aller Schicht-Variationen (informativ).', 'woocommerce' ),
             ]);
+
+            woocommerce_wp_text_input( [
+                'id'                => self::META_PLAN . '_bulk',
+                'label'             => __( 'Geplante Anzahl (alle Variationen setzen)', 'woocommerce' ),
+                'type'              => 'number',
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0',
+                ],
+                'desc_tip'          => true,
+                'description'       => __( 'Beim Speichern wird dieser Wert für alle Variationen als geplante Anzahl gesetzt. Danach können die Variationen einzeln angepasst werden.', 'woocommerce' ),
+            ] );
         }
 
+        // Variables Produkt, Parent verwaltet Bestand
         if ( $product->is_type( 'variable' ) && $product->managing_stock() ) {
 
             $value = (int) get_post_meta( $post->ID, self::META_PLAN, true );
@@ -124,34 +138,55 @@ class KS_Shift_Plugin {
     public function save_parent_fields( $post_id ) {
 
         $product = wc_get_product( $post_id );
-        if ( ! $product ) return;
-
-        // Save time interval for simple products
-        if ( isset( $_POST[self::META_TIME] ) && ! $product->is_type( 'variable' ) ) {
-            update_post_meta(
-                $post_id,
-                self::META_TIME,
-                sanitize_text_field( $_POST[self::META_TIME] )
-            );
-        }
-
-        if ( ! isset( $_POST[ self::META_PLAN ] ) ) {
+        if ( ! $product ) {
             return;
         }
 
-        $value = absint( $_POST[ self::META_PLAN ] );
+        /* ---------- SIMPLE PRODUCT ---------- */
+        if ( ! $product->is_type( 'variable' ) ) {
 
-        // Variable product
-        if ( $product->is_type( 'variable' ) ) {
-
-            if ( $product->managing_stock() ) {
-                update_post_meta( $post_id, self::META_PLAN, $value );
+            if ( isset( $_POST[ self::META_TIME ] ) ) {
+                update_post_meta(
+                    $post_id,
+                    self::META_TIME,
+                    sanitize_text_field( $_POST[ self::META_TIME ] )
+                );
+            }
+            if ( isset( $_POST[ self::META_PLAN ] ) ) {
+                update_post_meta(
+                    $post_id,
+                    self::META_PLAN,
+                    absint( $_POST[ self::META_PLAN ] )
+                );
             }
             return;
         }
 
-        update_post_meta( $post_id, self::META_PLAN, $value );
+        /* ---------- VARIABLE PRODUCT ---------- */
+
+        // Case 1: Variationen verwalten Bestand -> nur Bulk-Feld auswerten
+        if ( ! $product->managing_stock() ) {
+            $bulk_key = self::META_PLAN . '_bulk';
+            if ( isset( $_POST[ $bulk_key ] ) && $_POST[ $bulk_key ] !== '' ) {
+                $bulk_value = absint( $_POST[ $bulk_key ] );
+
+                foreach ( $product->get_children() as $child_id ) {
+                    update_post_meta( $child_id, self::META_PLAN, $bulk_value );
+                }
+            }
+            return;
+        }
+
+        // Case 2: Parent verwaltet Bestand -> planned_stock nur auf dem Parent speichern
+        if ( isset( $_POST[ self::META_PLAN ] ) ) {
+            update_post_meta(
+                $post_id,
+                self::META_PLAN,
+                absint( $_POST[ self::META_PLAN ] )
+            );
+        }
     }
+
 
     public function save_variation_fields( $variation_id, $i ) {
 
