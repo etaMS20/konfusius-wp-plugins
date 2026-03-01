@@ -127,12 +127,16 @@ class KS_Shift_Plugin {
             'wrapper_class' => 'form-row form-row-full',
         ]);
 
-        woocommerce_wp_text_input([
-            'id'            => self::META_PLAN . '[' . $loop . ']',
-            'label'         => __( 'Geplante Personen Anzahl', 'woocommerce' ),
-            'value'         => get_post_meta( $variation->ID, self::META_PLAN, true ),
-            'wrapper_class' => 'form-row form-row-full',
-        ]);
+        // Für Variationen, wenn Parent nicht Bestand verwaltet: geplante Anzahl anzeigen
+        $parent = wc_get_product( $variation->post_parent );
+        if ( $parent && ! $parent->managing_stock() ) {
+            woocommerce_wp_text_input([
+                'id'            => self::META_PLAN . '[' . $loop . ']',
+                'label'         => __( 'Geplante Personen Anzahl', 'woocommerce' ),
+                'value'         => get_post_meta( $variation->ID, self::META_PLAN, true ),
+                'wrapper_class' => 'form-row form-row-full',
+            ]);
+        }
     }
 
     public function save_parent_fields( $post_id ) {
