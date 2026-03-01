@@ -51,6 +51,18 @@ class KS_Shift_Plugin {
                 'desc_tip'    => true,
                 'description' => __( 'Zeitintervall für diese Schicht.', 'woocommerce' ),
             ]);
+
+            woocommerce_wp_text_input([
+                'id'                => self::META_PLAN,
+                'label'             => __( 'Geplante Anzahl', 'woocommerce' ),
+                'type'              => 'number',
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0'
+                ],
+                'desc_tip'          => true,
+                'description'       => 'Geplante Anzahl an Schichten.',
+            ]);
         }
 
         if ( $product->is_type('variable') && ! $product->managing_stock() ) {
@@ -70,28 +82,23 @@ class KS_Shift_Plugin {
             ]);
         }
 
-        $desc = '';
-        if ( ! $product->is_type('variable') ) {
-            $desc = __( 'Geplante Anzahl an Schichten.', 'woocommerce' );
-        } else {
-            if ( $product->managing_stock() ) {
-                $desc = __( 'Diese Schicht verwaltet den Bestand selbst, hat aber Variationen.', 'woocommerce' );
-            } else {
-                $desc = __( 'Einträge hier werden auf alle Schicht-Variationen angewendet.', 'woocommerce' );
-            }
-        }
+        if ( $product->is_type( 'variable' ) && $product->managing_stock() ) {
 
-        woocommerce_wp_text_input([
-            'id'                => self::META_PLAN,
-            'label'             => __( 'Geplante Anzahl', 'woocommerce' ),
-            'type'              => 'number',
-            'custom_attributes' => [
-                'step' => '1',
-                'min'  => '0'
-            ],
-            'desc_tip'          => true,
-            'description'       => $desc,
-        ]);
+            $value = (int) get_post_meta( $post->ID, self::META_PLAN, true );
+
+            woocommerce_wp_text_input( [
+                'id'                => self::META_PLAN,
+                'label'             => __( 'Schichten Geplant', 'woocommerce' ),
+                'type'              => 'number',
+                'value'             => $value,
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0',
+                ],
+                'desc_tip'          => true,
+                'description'       => __( 'Diese Schicht verwaltet den Bestand selbst, hat aber Variationen.', 'woocommerce' ),
+            ] );
+        }
 
         echo '</div>';
     }
@@ -128,32 +135,22 @@ class KS_Shift_Plugin {
             );
         }
 
-        // Save planned stock
-        if ( isset( $_POST[self::META_PLAN] ) ) {
+        if ( ! isset( $_POST[ self::META_PLAN ] ) ) {
+            return;
+        }
 
-            $value = absint( $_POST[self::META_PLAN] );
+        $value = absint( $_POST[ self::META_PLAN ] );
 
-            if ( $product->is_type( 'variable' ) ) {
+        // Variable product
+        if ( $product->is_type( 'variable' ) ) {
 
-                // Check if parent manages stock
-                if ( $product->managing_stock() ) {
-                    // Mode B: parent-managed
-                    update_post_meta( $post_id, self::META_PLAN, $value );
-                } else {
-                    // Mode A: variations manage stock
-                    $sum = 0;
-                    foreach ( $product->get_children() as $child_id ) {
-                        update_post_meta( $child_id, self::META_PLAN, $value );
-                        $sum += $value;
-                    }
-                    update_post_meta( $post_id, self::META_PLAN, $sum );
-                }
-
-            } else {
-                // Simple product
+            if ( $product->managing_stock() ) {
                 update_post_meta( $post_id, self::META_PLAN, $value );
             }
+            return;
         }
+
+        update_post_meta( $post_id, self::META_PLAN, $value );
     }
 
     public function save_variation_fields( $variation_id, $i ) {
