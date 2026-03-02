@@ -43,7 +43,7 @@ class KS_Shift_Plugin {
         . __( 'Dient ausschließlich der Planung der Schichten. Die Bestände müssen separat verwaltet werden.', 'woocommerce' )
         . '</p>';
 
-        // Für einfache Produkte: Zeitintervall anzeigen
+        // Einfaches Produkt: Zeitintervall + geplante Anzahl anzeigen
         if ( ! $product->is_type( 'variable' ) ) {
             woocommerce_wp_text_input([
                 'id'          => self::META_TIME,
@@ -51,8 +51,21 @@ class KS_Shift_Plugin {
                 'desc_tip'    => true,
                 'description' => __( 'Zeitintervall für diese Schicht.', 'woocommerce' ),
             ]);
+
+            woocommerce_wp_text_input([
+                'id'                => self::META_PLAN,
+                'label'             => __( 'Geplante Anzahl', 'woocommerce' ),
+                'type'              => 'number',
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0'
+                ],
+                'desc_tip'          => true,
+                'description'       => 'Geplante Anzahl an Schichten.',
+            ]);
         }
 
+        // Variables Produkt, Variationen verwalten ihren Bestand       
         if ( $product->is_type('variable') && ! $product->managing_stock() ) {
             $sum = 0;
             foreach ( $product->get_children() as $child_id ) {
@@ -68,30 +81,38 @@ class KS_Shift_Plugin {
                 'desc_tip'          => true,
                 'description'       => __( 'Summe der geplanten Anzahl aller Schicht-Variationen (informativ).', 'woocommerce' ),
             ]);
+
+            woocommerce_wp_text_input( [
+                'id'                => self::META_PLAN . '_bulk',
+                'label'             => __( 'Geplante Anzahl (alle Variationen setzen)', 'woocommerce' ),
+                'type'              => 'number',
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0',
+                ],
+                'desc_tip'          => true,
+                'description'       => __( 'Beim Speichern wird dieser Wert für alle Variationen als geplante Anzahl gesetzt. Danach können die Variationen einzeln angepasst werden.', 'woocommerce' ),
+            ] );
         }
 
-        $desc = '';
-        if ( ! $product->is_type('variable') ) {
-            $desc = __( 'Geplante Anzahl an Schichten.', 'woocommerce' );
-        } else {
-            if ( $product->managing_stock() ) {
-                $desc = __( 'Diese Schicht verwaltet den Bestand selbst, hat aber Variationen.', 'woocommerce' );
-            } else {
-                $desc = __( 'Einträge hier werden auf alle Schicht-Variationen angewendet.', 'woocommerce' );
-            }
-        }
+        // Variables Produkt, Parent verwaltet Bestand
+        if ( $product->is_type( 'variable' ) && $product->managing_stock() ) {
 
-        woocommerce_wp_text_input([
-            'id'                => self::META_PLAN,
-            'label'             => __( 'Geplante Anzahl', 'woocommerce' ),
-            'type'              => 'number',
-            'custom_attributes' => [
-                'step' => '1',
-                'min'  => '0'
-            ],
-            'desc_tip'          => true,
-            'description'       => $desc,
-        ]);
+            $value = (int) get_post_meta( $post->ID, self::META_PLAN, true );
+
+            woocommerce_wp_text_input( [
+                'id'                => self::META_PLAN,
+                'label'             => __( 'Schichten Geplant', 'woocommerce' ),
+                'type'              => 'number',
+                'value'             => $value,
+                'custom_attributes' => [
+                    'step' => '1',
+                    'min'  => '0',
+                ],
+                'desc_tip'          => true,
+                'description'       => __( 'Diese Schicht verwaltet den Bestand selbst, hat aber Variationen.', 'woocommerce' ),
+            ] );
+        }
 
         echo '</div>';
     }
@@ -106,55 +127,70 @@ class KS_Shift_Plugin {
             'wrapper_class' => 'form-row form-row-full',
         ]);
 
-        woocommerce_wp_text_input([
-            'id'            => self::META_PLAN . '[' . $loop . ']',
-            'label'         => __( 'Geplante Personen Anzahl', 'woocommerce' ),
-            'value'         => get_post_meta( $variation->ID, self::META_PLAN, true ),
-            'wrapper_class' => 'form-row form-row-full',
-        ]);
+        // Für Variationen, wenn Parent nicht Bestand verwaltet: geplante Anzahl anzeigen
+        $parent = wc_get_product( $variation->post_parent );
+        if ( $parent && ! $parent->managing_stock() ) {
+            woocommerce_wp_text_input([
+                'id'            => self::META_PLAN . '[' . $loop . ']',
+                'label'         => __( 'Geplante Personen Anzahl', 'woocommerce' ),
+                'value'         => get_post_meta( $variation->ID, self::META_PLAN, true ),
+                'wrapper_class' => 'form-row form-row-full',
+            ]);
+        }
     }
 
     public function save_parent_fields( $post_id ) {
 
         $product = wc_get_product( $post_id );
-        if ( ! $product ) return;
+        if ( ! $product ) {
+            return;
+        }
 
-        // Save time interval for simple products
-        if ( isset( $_POST[self::META_TIME] ) && ! $product->is_type( 'variable' ) ) {
+        /* ---------- SIMPLE PRODUCT ---------- */
+        if ( ! $product->is_type( 'variable' ) ) {
+
+            if ( isset( $_POST[ self::META_TIME ] ) ) {
+                update_post_meta(
+                    $post_id,
+                    self::META_TIME,
+                    sanitize_text_field( $_POST[ self::META_TIME ] )
+                );
+            }
+            if ( isset( $_POST[ self::META_PLAN ] ) ) {
+                update_post_meta(
+                    $post_id,
+                    self::META_PLAN,
+                    absint( $_POST[ self::META_PLAN ] )
+                );
+            }
+            return;
+        }
+
+        /* ---------- VARIABLE PRODUCT ---------- */
+
+        // Case 1: Variationen verwalten Bestand -> nur Bulk-Feld auswerten
+        if ( ! $product->managing_stock() ) {
+            $bulk_key = self::META_PLAN . '_bulk';
+            if ( isset( $_POST[ $bulk_key ] ) && $_POST[ $bulk_key ] !== '' ) {
+                $bulk_value = absint( $_POST[ $bulk_key ] );
+
+                foreach ( $product->get_children() as $child_id ) {
+                    update_post_meta( $child_id, self::META_PLAN, $bulk_value );
+                }
+            }
+            return;
+        }
+
+        // Case 2: Parent verwaltet Bestand -> planned_stock nur auf dem Parent speichern
+        if ( isset( $_POST[ self::META_PLAN ] ) ) {
             update_post_meta(
                 $post_id,
-                self::META_TIME,
-                sanitize_text_field( $_POST[self::META_TIME] )
+                self::META_PLAN,
+                absint( $_POST[ self::META_PLAN ] )
             );
         }
-
-        // Save planned stock
-        if ( isset( $_POST[self::META_PLAN] ) ) {
-
-            $value = absint( $_POST[self::META_PLAN] );
-
-            if ( $product->is_type( 'variable' ) ) {
-
-                // Check if parent manages stock
-                if ( $product->managing_stock() ) {
-                    // Mode B: parent-managed
-                    update_post_meta( $post_id, self::META_PLAN, $value );
-                } else {
-                    // Mode A: variations manage stock
-                    $sum = 0;
-                    foreach ( $product->get_children() as $child_id ) {
-                        update_post_meta( $child_id, self::META_PLAN, $value );
-                        $sum += $value;
-                    }
-                    update_post_meta( $post_id, self::META_PLAN, $sum );
-                }
-
-            } else {
-                // Simple product
-                update_post_meta( $post_id, self::META_PLAN, $value );
-            }
-        }
     }
+
 
     public function save_variation_fields( $variation_id, $i ) {
 

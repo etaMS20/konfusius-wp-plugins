@@ -19,12 +19,13 @@ function custom_process_checkout_meta($order, $request)
     $gebote_confirm = isset($data['gebote_confirm']) ? filter_var($data['gebote_confirm'], FILTER_VALIDATE_BOOLEAN) : false;
     $disclaimer_confirm = isset($data['disclaimer_confirm']) ? filter_var($data['disclaimer_confirm'], FILTER_VALIDATE_BOOLEAN) : null;
     $disclaimer_experience = isset($data['disclaimer_experience']) ? sanitize_text_field($data['disclaimer_experience']) : null;
+    $food_intolerance = isset($data['food_intolerance']) ? filter_var($data['food_intolerance'], FILTER_VALIDATE_BOOLEAN) : false;
 
     $order->update_meta_data('billing_invite', $invited_by);
     $order->update_meta_data('billing_gebote', $gebote_confirm);
     $order->update_meta_data('billing_disclaimer_experience', $disclaimer_experience);
     $order->update_meta_data('billing_disclaimer_confirmed', $disclaimer_confirm);
-
+    $order->update_meta_data('billing_food_intolerance', $food_intolerance);
     $order->save_meta_data();
 
     // check the 'invited_by' value against the allowed values
@@ -151,6 +152,7 @@ function get_orders_by_meta($request)
                 'full_name' => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
                 'email' => $order->get_billing_email(),
                 'billing_invite' => $order->get_meta('billing_invite', true), // Fetches the invite field
+                'billing_food_intolerance' => $order->get_meta('billing_food_intolerance', true) ?: false,
             ],
             'line_items' => array_values(array_map(function ($item) {
                 $variation_id = $item->get_variation_id();
